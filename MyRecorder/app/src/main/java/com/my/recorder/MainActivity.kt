@@ -13,7 +13,8 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
 import android.widget.LinearLayout
-import android.widget.Switch
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 
@@ -25,7 +26,7 @@ class MainActivity : Activity() {
     }
 
     private lateinit var recordButton: TextView
-    private lateinit var micSwitch: Switch
+    private lateinit var audioGroup: RadioGroup
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,11 +47,11 @@ class MainActivity : Activity() {
         root.addView(title)
 
         val sub = TextView(this).apply {
-            text = "녹화 버튼을 누르면 화면 녹화가 시작되고,\n화면 위에 뜨는 [■ 정지] 버튼으로 멈출 수 있어요.\n영상은 갤러리(Movies/MyRecorder)에 자동 저장돼요."
+            text = "녹화 버튼을 누르면 화면 녹화가 시작되고,\n화면 위에 뜨는 [■ 정지] 버튼으로 멈출 수 있어요.\n영상은 갤러리(Movies/MyRecorder)에 자동 저장돼요.\n※ 내부 소리도 \"녹음\" 권한이 필요해요."
             textSize = 14f
             setTextColor(Color.parseColor("#616161"))
             gravity = Gravity.CENTER
-            setPadding(0, dp(12), 0, dp(48))
+            setPadding(0, dp(12), 0, dp(28))
         }
         root.addView(sub)
 
@@ -64,16 +65,33 @@ class MainActivity : Activity() {
             }
             setOnClickListener { onRecordClicked() }
         }
-        root.addView(recordButton, LinearLayout.LayoutParams(dp(200), dp(200)))
+        root.addView(recordButton, LinearLayout.LayoutParams(dp(170), dp(170)))
 
-        micSwitch = Switch(this).apply {
-            text = "마이크 소리도 녹음  "
-            textSize = 16f
-            isChecked = false
+        val audioTitle = TextView(this).apply {
+            text = "녹음할 소리"
+            textSize = 15f
+            setTextColor(Color.parseColor("#424242"))
         }
-        root.addView(micSwitch, LinearLayout.LayoutParams(
+        root.addView(audioTitle, LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
-        ).apply { topMargin = dp(40) })
+        ).apply { topMargin = dp(32) })
+
+        audioGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        val options = listOf(
+            RecorderService.AUDIO_INTERNAL to "내부 소리 (유튜브·게임 소리)",
+            RecorderService.AUDIO_BOTH to "내부 소리 + 마이크",
+            RecorderService.AUDIO_MIC to "마이크만",
+            RecorderService.AUDIO_NONE to "소리 없음"
+        )
+        for ((mode, label) in options) {
+            audioGroup.addView(RadioButton(this).apply {
+                id = 1000 + mode
+                text = label
+                textSize = 16f
+            })
+        }
+        audioGroup.check(1000 + RecorderService.AUDIO_INTERNAL)
+        root.addView(audioGroup)
 
         setContentView(root)
     }
@@ -86,11 +104,17 @@ class MainActivity : Activity() {
     private fun updateButton() {
         if (RecorderService.isRecording) {
             recordButton.text = "■\n녹화 정지"
-            micSwitch.isEnabled = false
+            setAudioEnabled(false)
         } else {
             recordButton.text = "●\n녹화 시작"
-            micSwitch.isEnabled = true
+            setAudioEnabled(true)
         }
+    }
+
+    private fun audioMode(): Int = audioGroup.checkedRadioButtonId - 1000
+
+    private fun setAudioEnabled(on: Boolean) {
+        for (i in 0 until audioGroup.childCount) audioGroup.getChildAt(i).isEnabled = on
     }
 
     private fun onRecordClicked() {
@@ -115,7 +139,7 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) needed.add(Manifest.permission.POST_NOTIFICATIONS)
-        if (micSwitch.isChecked &&
+        if (audioMode() != RecorderService.AUDIO_NONE &&
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
         ) needed.add(Manifest.permission.RECORD_AUDIO)
 
@@ -130,11 +154,11 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQ_PERMS) {
-            if (micSwitch.isChecked &&
+            if (audioMode() != RecorderService.AUDIO_NONE &&
                 checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
             ) {
-                micSwitch.isChecked = false
-                Toast.makeText(this, "마이크 권한이 없어 소리 없이 녹화해요", Toast.LENGTH_SHORT).show()
+                audioGroup.check(1000 + RecorderService.AUDIO_NONE)
+                Toast.makeText(this, "소리 녹음 권한이 없어 소리 없이 녹화해요", Toast.LENGTH_LONG).show()
             }
             requestCapture()
         }
@@ -159,7 +183,7 @@ class MainActivity : Activity() {
             action = RecorderService.ACTION_START
             putExtra(RecorderService.EXTRA_RESULT_CODE, resultCode)
             putExtra(RecorderService.EXTRA_DATA, data)
-            putExtra(RecorderService.EXTRA_MIC, micSwitch.isChecked)
+            putExtra(RecorderService.EXTRA_AUDIO, audioMode())
         }
         startForegroundService(svc)
         // 녹화할 화면으로 이동할 수 있게 앱을 뒤로 보냄
